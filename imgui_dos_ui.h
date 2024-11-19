@@ -1,3 +1,5 @@
+#pragma once
+#include "imgui_internal.h"
 namespace ImGui
 {
     IMGUI_API void          SetDOSStyles();
@@ -30,4 +32,6 @@ namespace ImGui
     IMGUI_API bool          DOSTabItemButton(const char* label, ImGuiTabItemFlags flags = 0);      // create a Tab behaving like a button. return true when clicked. cannot be selected in the tab bar.
     IMGUI_API bool          DOSTabItemEx(ImGuiTabBar* tab_bar, const char* label, bool* p_open, ImGuiTabItemFlags flags, ImGuiWindow* docked_window);
     IMGUI_API void          DOSTabItemBackground(ImDrawList* draw_list, const ImRect& bb, ImGuiTabItemFlags flags, ImU32 col);
+    IMGUI_API bool          BeginDOSBorder(const char* str_id);
+    IMGUI_API void          EndDOSBorder();
 }
