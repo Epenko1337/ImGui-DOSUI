@@ -1,5 +1,4 @@
-#include "imgui.h"
-#include "imgui_internal.h"
+﻿#include "imgui.h"
 #include "imgui_dos_ui.h"
 using namespace ImGui;
 
@@ -48,6 +47,20 @@ void ImGui::SetDOSStyles()
     style.Colors[ImGuiCol_Header] = ImVec4(0, 0, 0, 0.31f);
     style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0, 0, 0, 0.8f);
     style.Colors[ImGuiCol_HeaderActive] = ImVec4(0, 0, 0, 1.0f);
+    style.Colors[ImGuiCol_TextSelectedBg] = style.Colors[ImGuiCol_WindowBg];
+}
+
+
+bool ImGui::BeginDOSBorder(const char* str_id)
+{
+    ImGui::Dummy(ImVec2(0, 0));
+    ImGui::SetCursorScreenPos(ImGui::GetCursorScreenPos() + ImGui::GetCurrentContext()->Style.WindowPadding);
+    return ImGui::BeginChild(str_id, ImGui::GetWindowSize() - ImGui::GetCurrentContext()->Style.WindowPadding * 2 - ImVec2(0.0f, 50.0f), ImGuiChildFlags_Border);
+}
+
+void ImGui::EndDOSBorder()
+{
+    ImGui::EndChild();
 }
 
 bool ImGui::DOSCheckbox(const char* label, bool* v)
@@ -100,7 +113,6 @@ bool ImGui::DOSCheckbox(const char* label, bool* v)
     if (is_visible)
     {
         RenderNavHighlight(total_bb, id);
-        ImU32 check_col = GetColorU32(ImGuiCol_CheckMark);
         if (*v)
         {
             RenderText(total_bb.Min + ImVec2(0, style.FramePadding.y), "[■]");
@@ -259,12 +271,24 @@ bool ImGui::DOSSliderScalar(const char* label, ImGuiDataType data_type, void* p_
 
     ImGuiContext& g = *GImGui;
     const ImGuiStyle& style = g.Style;
+
+    bool manual_hide = false;
+    if (label[0] != '#' && label[1] != '#')
+    {
+        size_t label_len = strlen(label);
+        char* label_hidden = new char[label_len + 3];
+        memset(label_hidden, '#', 2);
+        strcpy_s(label_hidden + 2, label_len + 1, label);
+        label = label_hidden;
+        manual_hide = true;
+    }
+
     const ImGuiID id = window->GetID(label);
     float w = CalcItemWidth();
 
-    ImVec2 label_size = CalcTextSize(label, NULL, true);
+    ImVec2 label_size = CalcTextSize(label + (manual_hide ? 2 : 0), NULL, true);
     if (label_size.x == 0.0f) label_size.y = 0.0f;
-    const ImVec2 symbol_size = CalcTextSize(u8"░");
+    const ImVec2 symbol_size = CalcTextSize("░");
     const int size_in_symbols = floorf(w / symbol_size.x);
     w = size_in_symbols * symbol_size.x;
 
@@ -279,6 +303,7 @@ bool ImGui::DOSSliderScalar(const char* label, ImGuiDataType data_type, void* p_
     ItemSize(total_bb, style.FramePadding.y);
     if (!ItemAdd(total_bb, id, &frame_bb, temp_input_allowed ? ImGuiItemFlags_Inputable : 0))
     {
+        if (manual_hide) delete[] label;
         return false;
     }
 
@@ -286,7 +311,7 @@ bool ImGui::DOSSliderScalar(const char* label, ImGuiDataType data_type, void* p_
     if (format == NULL)
         format = DataTypeGetInfo(data_type)->PrintFmt;
 
-    const bool hovered = ItemHoverable(frame_bb, id, g.LastItemData.InFlags);
+    const bool hovered = ItemHoverable(slider_bb, id, g.LastItemData.InFlags);
     bool temp_input_is_active = temp_input_allowed && TempInputIsActive(id);
     if (!temp_input_is_active)
     {
@@ -308,19 +333,42 @@ bool ImGui::DOSSliderScalar(const char* label, ImGuiDataType data_type, void* p_
         }
     }
 
-    if (temp_input_is_active && false)
+    // Display value using user-provided display format so user can add prefix/suffix/decorations to the value.
+    char value_buf[64];
+    const char* value_buf_end = value_buf + DataTypeFormatString(value_buf, IM_ARRAYSIZE(value_buf), data_type, p_data, format);
+    if (g.LogEnabled)
+        LogSetNextTextDecoration("{", "}");
+
+    size_t value_len = (value_buf_end - value_buf);
+    size_t label_len = strlen(label) - (manual_hide ? 2 : 0);
+    size_t full_label_size = label_len + value_len + 2;
+    char* full_label = new char[full_label_size];
+    memset(full_label, 0, full_label_size);
+    strcat_s(full_label, full_label_size, label + (manual_hide ? 2 : 0));
+    strcat_s(full_label, full_label_size, ":");
+    memcpy_s(full_label + full_label_size - value_len - 1, value_len + 1, value_buf, value_len);
+    full_label[full_label_size - 1] = 0;
+
+    if (label_size.x > 0.0f)
     {
-        // Only clamp CTRL+Click input when ImGuiSliderFlags_AlwaysClamp is set
+        RenderText(ImVec2(frame_bb.Min.x, frame_bb.Min.y + style.FramePadding.y), full_label);
+    }
+
+    delete[] full_label;
+
+    if (temp_input_is_active)
+    {
         const bool is_clamp_input = (flags & ImGuiSliderFlags_AlwaysClamp) != 0;
-        return TempInputScalar(frame_bb, id, label, data_type, p_data, format, is_clamp_input ? p_min : NULL, is_clamp_input ? p_max : NULL);
+        bool input_result = TempInputScalar(slider_bb, id, label, data_type, p_data, format, is_clamp_input ? p_min : NULL, is_clamp_input ? p_max : NULL);
+        if (manual_hide) delete[] label;
+        return input_result;
     }
 
     // Draw frame
-    const ImU32 frame_col = GetColorU32(g.ActiveId == id ? ImGuiCol_FrameBgActive : hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
     RenderNavHighlight(frame_bb, id);
     for (int i = 0; i < size_in_symbols; i++)
     {
-        RenderText(slider_bb.Min + ImVec2(symbol_size.x * i, 0.0f), u8"░");
+        RenderText(slider_bb.Min + ImVec2(symbol_size.x * i, 0.0f), "░");
     }
 
     // Slider behavior
@@ -331,24 +379,12 @@ bool ImGui::DOSSliderScalar(const char* label, ImGuiDataType data_type, void* p_
         MarkItemEdited(id);
 
     if (hovered || g.ActiveId == id) PushStyleColor(ImGuiCol_Text, GetColorU32(ImGuiCol_TextLink));
-    RenderText(grab_bb.Min, u8"█");
+    RenderText(grab_bb.Min, "█");
 
-    // Display value using user-provided display format so user can add prefix/suffix/decorations to the value.
-    char value_buf[64];
-    const char* value_buf_end = value_buf + DataTypeFormatString(value_buf, IM_ARRAYSIZE(value_buf), data_type, p_data, format);
-    if (g.LogEnabled)
-        LogSetNextTextDecoration("{", "}");
-
-    const ImVec2 delimeter_size = CalcTextSize(":");
-    if (label_size.x > 0.0f)
-    {
-        RenderText(ImVec2(frame_bb.Min.x, frame_bb.Min.y + style.FramePadding.y), label);
-        RenderText(ImVec2(frame_bb.Min.x + label_size.x, frame_bb.Min.y + style.FramePadding.y), ":");
-        RenderText(ImVec2(frame_bb.Min.x + label_size.x + delimeter_size.x + 1, frame_bb.Min.y + style.FramePadding.y), value_buf, value_buf_end);
-    }
     if (hovered || g.ActiveId == id) PopStyleColor();
 
     IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags | (temp_input_allowed ? ImGuiItemStatusFlags_Inputable : 0));
+    if (manual_hide) delete[] label;
     return value_changed;
 }
 
@@ -372,7 +408,7 @@ bool ImGui::DOSSliderScalarN(const char* label, ImGuiDataType data_type, void* v
         char* full_label = nullptr;
         char value_buf[64];
         void* temp_v = v;
-        char** values = new char*[components];
+        char** values = new char* [components];
         unsigned int values_size = 0;
         for (int i = 0; i < components; i++)
         {
@@ -396,7 +432,7 @@ bool ImGui::DOSSliderScalarN(const char* label, ImGuiDataType data_type, void* v
         for (int i = 0; i < components; i++)
         {
             strcat_s(full_label, full_label_size + 1, values[i]);
-            if (i + 1 < components) 
+            if (i + 1 < components)
                 strcat_s(full_label, full_label_size + 1, ", ");
             delete[] values[i];
         }
@@ -568,7 +604,6 @@ bool ImGui::BeginDOSComboPopup(ImGuiID popup_id, const ImRect& bb, ImGuiComboFla
         g.NextWindowData.ClearFlags();
         return false;
     }
-    const ImVec2 shadow_padding = ImVec2(8, 10);
 
     // Set popup size
     float w = bb.GetWidth();
@@ -1047,7 +1082,6 @@ void ImGui::DOSTabBarLayout(ImGuiTabBar* tab_bar)
 
     // Compute ideal tabs widths + store them into shrink buffer
     ImGuiTabItem* most_recently_selected_tab = NULL;
-    int curr_section_n = -1;
     bool found_selected_tab_id = false;
     for (int tab_n = 0; tab_n < tab_bar->Tabs.Size; tab_n++)
     {
@@ -1071,7 +1105,6 @@ void ImGui::DOSTabBarLayout(ImGuiTabBar* tab_bar)
         int section_n = TabItemGetSectionIdx(tab);
         ImGuiTabBarSection* section = &sections[section_n];
         section->Width += tab->ContentWidth + (0.0f);
-        curr_section_n = section_n;
 
         // Store data so we can build an array sorted by width if we need to shrink tabs down
         IM_MSVC_WARNING_SUPPRESS(6385);
@@ -1449,12 +1482,10 @@ void DOSTabItemLabelAndCloseButton(ImDrawList* draw_list, const ImRect& bb, ImGu
     // This is all rather complicated
     // (the main idea is that because the close button only appears on hover, we don't want it to alter the ellipsis position)
     // FIXME: if FramePadding is noticeably large, ellipsis_max_x will be wrong here (e.g. #3497), maybe for consistency that parameter of RenderTextEllipsis() shouldn't exist..
-    float ellipsis_max_x = close_button_visible ? text_pixel_clip_bb.Max.x : bb.Max.x - 1.0f;
     if (close_button_visible || unsaved_marker_visible)
     {
         text_pixel_clip_bb.Max.x -= close_button_visible ? (button_sz) : (button_sz * 0.80f);
         text_ellipsis_clip_bb.Max.x -= unsaved_marker_visible ? (button_sz * 0.80f) : 0.0f;
-        ellipsis_max_x = text_pixel_clip_bb.Max.x;
     }
     //RenderTextEllipsis(draw_list, text_ellipsis_clip_bb.Min, text_ellipsis_clip_bb.Max, text_pixel_clip_bb.Max.x, ellipsis_max_x, label, NULL, &label_size);
     RenderTextClipped(bb.Min, bb.Max, label, NULL, &label_size, ImVec2(0.5f, 0.5f));
